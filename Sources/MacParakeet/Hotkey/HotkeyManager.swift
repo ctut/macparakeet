@@ -53,6 +53,10 @@ public final class HotkeyManager {
     /// Passive ledger for ordinary virtual key codes. The canonical macOS
     /// keyboard range is 0...127; Fn's synthetic 179 is deliberately excluded.
     private static let ordinaryKeyCodeRange: ClosedRange<UInt16> = 0...127
+    /// Caps Lock latch is reported as key 57 still down by
+    /// `CGEventSource.keyState`. That is not a held key. Transitions are
+    /// observed via flagsChanged keyCode 57 + alphaShift delta.
+    private static let capsLockKeyCode: UInt16 = 57
     private var pressedNonFnKeyCodes: Set<UInt16> = []
     private var physicalKeyStateProvider: (UInt16) -> Bool
 
@@ -97,7 +101,8 @@ public final class HotkeyManager {
     }
 
     static func eventMask(for trigger: HotkeyTrigger) -> CGEventMask {
-        var mask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
+        var mask: CGEventMask =
+            (1 << CGEventType.flagsChanged.rawValue)
             | (1 << CGEventType.keyDown.rawValue)
         if trigger == .fn || trigger.kind == .keyCode || trigger.kind == .chord {
             mask |= (1 << CGEventType.keyUp.rawValue)
@@ -207,6 +212,10 @@ public final class HotkeyManager {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
             recoverFromDisabledTap()
+            return Unmanaged.passUnretained(event)
+        }
+
+        if StreamingCursorEventMarker.isMarked(event) {
             return Unmanaged.passUnretained(event)
         }
 
@@ -387,7 +396,8 @@ public final class HotkeyManager {
                 to: flags,
                 changedKeyCode: changedKeyCode
             ).subtracting([HotkeyTrigger.canonicalFnKeyCode])
-            let capsLockChanged = changedKeyCode == 57
+            let capsLockChanged =
+                changedKeyCode == Self.capsLockKeyCode
                 && previousModifierFlags.contains(.maskAlphaShift) != flags.contains(.maskAlphaShift)
             guard !changedModifiers.isEmpty || capsLockChanged else { return [] }
 
@@ -449,7 +459,8 @@ public final class HotkeyManager {
     ) -> [HotkeyGestureController.Output] {
         let physicalKeyCode = UInt16(keyCode)
         guard trigger == .fn,
-              Self.isTrackableNonFnKeyCode(physicalKeyCode) else {
+            Self.isTrackableNonFnKeyCode(physicalKeyCode)
+        else {
             return []
         }
         pressedNonFnKeyCodes.remove(physicalKeyCode)
@@ -912,8 +923,9 @@ public final class HotkeyManager {
                 && (targetModifierGestureIsActive || gestureController.hasPendingTriggerPress)
             reconcilePassiveFnKeyState()
             if triggerPressed,
-               passiveFnInputIsContaminated(flags: currentFlags)
-               || capsLockContaminatesCurrentGesture {
+                passiveFnInputIsContaminated(flags: currentFlags)
+                    || capsLockContaminatesCurrentGesture
+            {
                 cancelStartupTimer()
                 cancelHoldTimer()
                 syncRecoveredTriggerState(
@@ -1098,14 +1110,16 @@ public final class HotkeyManager {
     }
 
     private static func isTrackableNonFnKeyCode(_ keyCode: UInt16) -> Bool {
-        ordinaryKeyCodeRange.contains(keyCode) && !HotkeyTrigger.isFnKeyCode(keyCode)
+        ordinaryKeyCodeRange.contains(keyCode)
+            && !HotkeyTrigger.isFnKeyCode(keyCode)
+            && keyCode != capsLockKeyCode
     }
 
     private func reconcilePassiveFnKeyState() {
         guard trigger == .fn else { return }
         pressedNonFnKeyCodes = Set(
             Self.ordinaryKeyCodeRange.filter { keyCode in
-                !HotkeyTrigger.isFnKeyCode(keyCode) && physicalKeyStateProvider(keyCode)
+                Self.isTrackableNonFnKeyCode(keyCode) && physicalKeyStateProvider(keyCode)
             }
         )
     }

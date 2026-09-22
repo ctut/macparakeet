@@ -22,6 +22,7 @@ public actor MockClipboardService: ClipboardServiceProtocol {
     private var pasteError: Error?
     private var pasteDelayMs: UInt64 = 0
     private var postPasteActionFired = true
+    private var copySucceeds = true
 
     public init() {}
 
@@ -84,12 +85,17 @@ public actor MockClipboardService: ClipboardServiceProtocol {
     }
 
     public func copyToClipboard(_ text: String) async -> Bool {
+        guard copySucceeds else { return false }
         lastCopiedText = text
         return true
     }
 
     public func setPasteError(_ error: Error?) {
         pasteError = error
+    }
+
+    public func setCopySucceeds(_ succeeds: Bool) {
+        copySucceeds = succeeds
     }
 
     public func setPasteDelayMs(_ delayMs: UInt64) {
